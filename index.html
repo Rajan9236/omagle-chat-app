@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Omagle Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: sans-serif;
+      background: linear-gradient(135deg, #111, #222);
+      color: white; display: flex; flex-direction: column; align-items: center;
+    }
+    h1 { margin: 1rem 0; }
+    #video-grid { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; }
+    video {
+      width: 100%; max-width: 400px;
+      border: 2px solid cyan; border-radius: 10px;
+    }
+    #chat {
+      width: 90%; max-width: 600px;
+      margin: 1rem 0; background: rgba(255,255,255,0.05);
+      padding: 1rem; border-radius: 10px;
+      display: flex; flex-direction: column;
+    }
+    #messages { height: 200px; overflow-y: auto; margin-bottom: 0.5rem; }
+    #messages div { margin: 0.3rem 0; }
+    #input-area {
+      display: flex; gap: 0.5rem;
+    }
+    input, button {
+      padding: 0.5rem; border: 1px solid cyan;
+      border-radius: 5px; background: transparent; color: white;
+    }
+    button:hover { background: cyan; color: black; }
+  </style>
+</head>
+<body>
+  <h1>Omagle Video + Text Chat</h1>
+  <div id="video-grid">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+
+  <div id="chat">
+    <div id="messages"></div>
+    <div id="input-area">
+      <input id="messageInput" type="text" placeholder="Say something..."/>
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const messages = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+
+    let localStream, peerConnection;
+    const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+      localStream = stream;
+      localVideo.srcObject = stream;
+      socket.emit('join');
+    });
+
+    socket.on('match', () => {
+      peerConnection = createPeerConnection();
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+      peerConnection.createOffer().then(offer => {
+        peerConnection.setLocalDescription(offer);
+        socket.emit('offer', offer);
+      });
+    });
+
+    socket.on('offer', offer => {
+      peerConnection = createPeerConnection();
+      peerConnection.setRemoteDescription(offer);
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+      peerConnection.createAnswer().then(answer => {
+        peerConnection.setLocalDescription(answer);
+        socket.emit('answer', answer);
+      });
+    });
+
+    socket.on('answer', answer => {
+      peerConnection.setRemoteDescription(answer);
+    });
+
+    socket.on('candidate', candidate => {
+      peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    function createPeerConnection() {
+      const pc = new RTCPeerConnection(config);
+      pc.ontrack = e => remoteVideo.srcObject = e.streams[0];
+      pc.onicecandidate = e => {
+        if (e.candidate) socket.emit('candidate', e.candidate);
+      };
+      return pc;
+    }
+
+    socket.on('message', text => {
+      const msg = document.createElement('div');
+      msg.textContent = 'Stranger: ' + text;
+      messages.appendChild(msg);
+    });
+
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text) return;
+      socket.emit('message', text);
+      const myMsg = document.createElement('div');
+      myMsg.textContent = 'You: ' + text;
+      messages.appendChild(myMsg);
+      messageInput.value = '';
+    }
+  </script>
+</body>
+</html>
